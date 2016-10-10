@@ -1,0 +1,146 @@
+csv2rfl
+=======
+
+csv2rfl is a utility for conversion between DSV and RFL format.
+
+The RFL transformation format allows the contents of CSV/TSV/DSV files to be processed with standard POSIX command line tools, because it eliminates the complexities of quoting and field delimiting.
+
+DSV means "delimiter-separated format" and includes CSV as the default variant.
+
+RFL means "record-field-line", and is a line-based transformation of DSV. It is defined in this document.
+
+Background
+----------
+
+CSV (comma-separated values) and TSV (tabulation-separated values) are common specializations of the more general DSV format which allows to specify the delimiter character to be used explicitly.
+
+DSV is frequently used for exchanging tabular data, where logical lines represent records and columns are separated by a common separation character.
+
+A problem arises, however, when the colums contain multiline text, or include the separation character themselves.
+
+For this purpose, DSV quotes such fields by enclosing the field contents between two quote characters.
+
+Normally the double quote character (ASCII code 34) is used as the quoting character, but some DSV implementations allow to freely specify any character as the quoting character.
+
+Another complication is the inclusion of the literal quoting character within a quoted field: In this case, the quoting character needs to be doubled, representing one literal quoting character as part of the text.
+
+Finally, the question arises what to do if the quoting character occurs within an unquoted field, but not at its beginning: Does the quoting character need duplication in this case also, in order to be recognized as a literal field character? Or is it just taken literally as-is?
+
+All those choices make CSV files complicated if not impossible to process with typical line-based standard POSIX command line utilities.
+
+The RFL format has been designed to losslessly transform CSV/TSV/DSV files into a line-based format which is friendly to being processed by standard POSIX command line tools.
+
+RFL requires more storage space than CSV/TSV/DSV, and is therefore not well suited for long-time storage.
+
+It is a useful intermediate format however, for extraction or manipulation of the contents of CSV/TSV/DSV files.
+
+RFL format description
+----------------------
+
+rfl_file = {rfl_line}.
+rfl_line = record space field space line space contents.
+record = integer.
+field = integer [":" column_name].
+line = integer.
+integer = {"0"} (nonzero_digit {digit} | "0").
+digit = nonzero_digit | "0".
+nonzero_digit = "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9".
+space = " ".
+column_name = text_without_whitespace.
+
+The above definition is specified as EBNF, where square brackets enclose optional items, and curly braces enclose items which may be repeated 0 or more times. Literal text is quoted, any unquoted identifiers represent non-terminals.
+
+Some aspects of RFL could not be expressed in the EBNF above and are explained in the following paragraphs.
+
+* All integers for record, field and line numbers have the same length within their respective set, and will be padded with leading zeroes to that length. "within their respective set" means that record numbers can have a different length than field numbers, but all record numbers have the same length and all field numbers have the same length. The same is true for line numbers.
+
+* Contents from multiline DSV fields is split into multiple RFL lines which have the same record and field, but different line numbers.
+
+* Record, field and line numbers start with 1.
+
+* At the DSV-level, any kind of line ending is recognized: CRLF, LF, CR which is not followed by LF).
+
+* All DSV columns *not* containing any line ending sequence will be transformed into a single RFL output line with line number 1, and terminated with a newline character '\n' (whatever character the C compiler used for compiling csv2rfl considers to be '\n').
+
+* For DSV file where the first record represents column names, the fields in the RFL output will also contain those field names, separated from the field number with a colon (":") character.
+
+* Non-terminal text_without_whitespace is a reversable transformation of an original DSV column name to a form which does not contain any whitespace characters. This is achieved by an URL-like encoding, where every ASCII whitespace character is replaced by "%" and a two-digit lower-case hexadecimal encoding of a byte value. A literal "%"-character itself is also encoded in this way.
+
+* The text_without_whitespace transformation does not care about extended UNICODE whitespace characters, because the input character set is not known. It only considers whitespace according to the ASCII character set. Furthermore, ASCII control characters will also be "%"-escaped, not just true whitespace characters.
+
+* The same 3 cases of line-ending sequences are recognized within multiline DSV fields as are used to detect the end of a logical DSV line. Unlike single-value DSV fields not containing any line ending sequence, by default the original line ending sequence will also be used to terminate the RFL output line.
+
+* If a multiline DSV field contains a line-ending sequence at its end, then this line is followed by an additional trailing but empty RFL output line for that field.
+
+Some examples
+-------------
+
+Let's assume we have a standard CSV file ("," as field delimiter and '"' as quote character, first line are headers) with the following contents:
+
+
+Name,e-mail,Comment
+John Doe,anyone@test.com,A rather fishy guy no-one really knows
+Richard Roe,rr@test.com,"Not much better, either."
+Jane Doe,jd@test.com,"Is this the sister of John Doe?
+
+I am are not sure."
+Petra Pretty,bombshell@test.com,"Wow she is so hot!
+
+I wrote the following for her:
+
+/Petra, you are so sweet/
+/I swear I'll sweep you/
+/off your feet!/
+"
+"Smith, Mr.",smith@test.com,First name not known.
+
+
+On conversion into RFL, the following output will be produced from the above input:
+
+1 1:Name 1 John Doe
+1 2:e-mail 1 anyone@test.com
+1 3:Comment 1 A rather fishy guy no-one really knows
+2 1:Name 1 Richard Roe
+2 2:e-mail 1 rr@test.com
+2 3:Comment 1 Not much better, either.
+3 1:Name 1 Jane Doe
+3 2:e-mail 1 jd@test.com
+3 3:Comment 1 Is this the sister of John Doe?
+3 3:Comment 2
+3 3:Comment 3 I am are not sure.
+4 1:Name 1 Petra Pretty
+4 2:e-mail 1 bombshell@test.com
+4 3:Comment 1 Wow she is so hot!
+4 3:Comment 2
+4 3:Comment 3 I wrote the following for her:
+4 3:Comment 4
+4 3:Comment 5 /Petra, you are so sweet/
+4 3:Comment 6 /I swear I'll sweep you/
+4 3:Comment 7 /off your feet!/
+4 3:Comment 8
+5 1:Name 1 Smith, Mr.
+5 2:e-mail 1 smith@test.com
+5 3:Comment 1 First name not known.
+
+Implementation details
+----------------------
+
+In order to determine the required padding lengths for the record, field and line numbers, the input files needs to be processed twice.
+
+In order to allow input from a pipe, the input is transformed into a temporary file first while determining the maximum numeric values for the beforementioned fields, and is then read again to format the output with fixed-length numbers.
+
+In order to avoid completely parsing the file twice, the temporary file will already contain the parsed DSV contents in a binary format.
+
+The format only contains the actual data-lines of the DSV files; any column name definitions are only held in memory.
+
+The temporary file is a binary platform-dependent stream, consisting of records starting with an opcode byte.
+
+If the byte has a value 0 through 253, this represents the byte length of the next field contents, which has already been un-escaped if necessary. The field contents follows.
+
+If the byte has the value 254, then a byte follows which represents a count of empty fields which are represented by the byte's value + 3. That is, a byte value of 0 represents 3 empty fields, value 1 represents 4 empty fields, and so on, until the value of 255 which represents 258 empty fields.
+
+If the byte has the value 255, then a size_t follows in native platform encoding, representing the byte length of the following field contents. This variant is only used for fields with lengths larger than 253 bytes.
+
+Using this encoding, the temporary files contains all records, from top to bottom of the DSV input file, fields left to right within each line.
+
+The output of empty fields is delayed until 258 consecutive empty fields have been encountered, or a non-empty field, of EOF. The empty fields are then output either as one or two bytes with value 0, or as a byte with value 254 followed by the number - 3 of delayed empty fields.
