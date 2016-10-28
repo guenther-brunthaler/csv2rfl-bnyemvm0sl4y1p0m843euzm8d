@@ -1,0 +1,51 @@
+#! /bin/sh
+# Copyright (c) 2016 Guenther Brunthaler. All rights reserved.
+# 
+# This script is free software.
+# Distribution is permitted under the terms of the GPLv3.
+
+set -e
+cleanup() {
+	rc=$?
+	for p in "$ehelper" "$ihelper"
+	do
+		test -z "$p" && continue
+		kill "$p" || :
+		wait "$p" || :
+	done 2> /dev/null
+	test -n "$TD" && rm -rf -- "$TD"
+	test $rc = 0 || printf '%s failed!\n' "$0" >& 2
+}
+TD=
+ihelper=
+ehelper=
+trap cleanup 0
+trap 'exit $?' TERM INT HUP QUIT
+TD=`mktemp -d "${TMPDIR:-/tmp}/${0##*/}.XXXXXXXXXX"`
+ain=$TD/awk.in
+mkfifo -m 700 -- "$ain"
+if test $# = 0
+then
+	cat > "$ain"
+else
+	for f
+	do
+		cat < "$f" > "$ain"
+	done
+fi & ihelper=$!
+aerr=$TD/awk.error
+mkfifo -m 700 -- "$aerr"
+cat < "$aerr" >& 2 & ehelper=$!
+failure=`false || echo $?`
+awk -f - -v failure=$failure -v stdin="$ain" -v stderr="$aerr" << 'EOF_AWK'
+BEGIN {
+	while (rc= getline line < stdin) {
+		if (rc < 0) {
+			print "read error!" > stderr
+			exit failure
+		}
+		print line
+	}
+}
+EOF_AWK
+wait $ihelper; ihelper=
