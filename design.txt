@@ -122,6 +122,14 @@ On conversion into RFL, the following output will be produced from the above inp
 5 2:e-mail 1 smith@test.com
 5 3:Comment 1 First name not known.
 
+Field values which are not empty follow after the line number, separated from it by a single ASCII space. This includes fields which are made entirely of whitespace characters, too.
+
+Field values which are empty, i. e. lines which consist only of a newline sequence, or single-line fields which do not even contain whitespace characters, directly follow the line number without a separating space.
+
+That is, one can determine by looking at the next character after the line number which of the cases actually applies.
+
+Or, putting it even simpler: If there is a space after the line number, then it is a separator which needs to be skipped. The rest of the line, including the line feed sequence, represents the next line of the field value.
+
 Implementation details
 ----------------------
 
